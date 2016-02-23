@@ -59,9 +59,10 @@ data Actions m = Actions
 type LocalVarName = JSS.Id ()
 type GlobalVarName = JSS.Id ()
 
-data LoggingInfo = LoggingInfo
-    { liScopeDepth :: Int
+newtype LoggingInfo = LoggingInfo
+    { _liScopeDepth :: Int
     } deriving Show
+Lens.makeLenses ''LoggingInfo
 
 data Mode = FastSilent | SlowLogging LoggingInfo
     deriving Show
@@ -69,7 +70,7 @@ data Mode = FastSilent | SlowLogging LoggingInfo
 data Env m = Env
     { envActions :: Actions m
     , _envLocals :: Map V.Var LocalVarName
-    , envMode :: Mode
+    , _envMode :: Mode
     }
 Lens.makeLenses ''Env
 
@@ -116,9 +117,9 @@ run actions act =
     Env
     { envActions = actions
     , _envLocals = mempty
-    , envMode =
+    , _envMode =
       SlowLogging
-      LoggingInfo { liScopeDepth = 0 }
+      LoggingInfo { _liScopeDepth = 0 }
     }
     State
     { _freshId = 0
@@ -454,7 +455,35 @@ compileLeaf leaf =
 compileLambda :: Monad m => V.Lam (Val (ValI m)) -> M m CodeGen
 compileLambda (V.Lam v res) =
     do
-        (vId, lamStmts) <- compileVal res <&> codeGenLamStmts & withLocalVar v
+        wrap <-
+            Lens.view envMode & M
+            <&> \case
+            FastSilent -> id
+            SlowLogging loggingInfo ->
+                act
+                & RWS.local (envMode .~ SlowLogging (loggingInfo & liScopeDepth +~ 1))
+                <&> _2 %~ (stmts ++)
+                where
+                    stmts =
+                        [ JS.vardecls
+                          [ JS.varinit (scopeIdent myScopeDepth) [jsexpr|scopeCounter++|]
+                          , JS.varinit "log" $
+                            JS.lambda ["exprId", "result"] $
+                            JS.var "logResult" `JS.call`
+                            [ JS.var (scopeIdent myScopeDepth)
+                            , JS.var "exprId"
+                            , JS.var "result"
+                            ]
+                          ]
+                        , JS.var "logNewScope" `JS.call`
+                          [ JS.var (scopeIdent parentScopeDepth)
+                        ]
+                    parentScopeDepth = loggingInfo ^. liScopeDepth
+                    myScopeDepth = parentScopeDepth + 1
+                    scopeIdent depth = "scopeId_" ++ show depth & JS.ident
+
+        (vId, lamStmts) <-
+            compileVal res <&> codeGenLamStmts & withLocalVar v & wrap
         JS.lambda [vId] lamStmts & codeGenFromExpr & return
 
 compileApply :: Monad m => V.Apply (Val (ValI m)) -> M m CodeGen
@@ -466,7 +495,7 @@ compileApply (V.Apply func arg) =
 
 maybeLogSubexprResult :: CodeGen -> M m CodeGen
 maybeLogSubexprResult codeGen =
-    RWS.asks envMode & M
+    Lens.view envMode & M
     <&> \case
     FastSilent -> codeGen
     SlowLogging loggingInfo -> logSubexprResult loggingInfo codeGen
