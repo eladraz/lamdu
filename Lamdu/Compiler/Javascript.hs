@@ -1,4 +1,4 @@
-{-# LANGUAGE NoImplicitPrelude, GeneralizedNewtypeDeriving, TemplateHaskell, QuasiQuotes, OverloadedStrings, PolymorphicComponents #-}
+{-# LANGUAGE NoImplicitPrelude, LambdaCase, GeneralizedNewtypeDeriving, TemplateHaskell, QuasiQuotes, OverloadedStrings, PolymorphicComponents #-}
 -- | Compile Lamdu vals to Javascript
 
 module Lamdu.Compiler.Javascript
@@ -45,7 +45,7 @@ import qualified Lamdu.Expr.Val as V
 import qualified Language.ECMAScript3.PrettyPrint as JSPP
 import qualified Language.ECMAScript3.Syntax as JSS
 import qualified Language.ECMAScript3.Syntax.CodeGen as JS
-import           Language.ECMAScript3.Syntax.QuasiQuote (jsexpr)
+import           Language.ECMAScript3.Syntax.QuasiQuote (jsexpr, jsstmt)
 
 import           Prelude.Compat
 
@@ -59,9 +59,17 @@ data Actions m = Actions
 type LocalVarName = JSS.Id ()
 type GlobalVarName = JSS.Id ()
 
+data LoggingInfo = LoggingInfo
+    { liScopeDepth :: Int
+    } deriving Show
+
+data Mode = FastSilent | SlowLogging LoggingInfo
+    deriving Show
+
 data Env m = Env
     { envActions :: Actions m
     , _envLocals :: Map V.Var LocalVarName
+    , envMode :: Mode
     }
 Lens.makeLenses ''Env
 
@@ -94,11 +102,28 @@ ppOut stmt =
         actions <- RWS.asks envActions & M
         pp stmt & output actions & liftIO
 
+topLevelDecls :: [JSS.Statement ()]
+topLevelDecls =
+    [ [jsstmt|var scopeId_0 = 0;|]
+    , [jsstmt|var scopeCounter = 1;|]
+    ] <&> void
+
 run :: Actions m -> M m (JSS.Expression ()) -> IO ()
 run actions act =
     runRWST
-    (act <&> wrap >>= ppOut & unM)
-    (Env actions mempty) (State 0 mempty)
+    (traverse ppOut topLevelDecls
+     >> act <&> wrap >>= ppOut & unM)
+    Env
+    { envActions = actions
+    , _envLocals = mempty
+    , envMode =
+      SlowLogging
+      LoggingInfo { liScopeDepth = 0 }
+    }
+    State
+    { _freshId = 0
+    , _compiled = mempty
+    }
     <&> (^. _1)
     where
         wrap replExpr =
@@ -384,9 +409,6 @@ compileInject (V.Inject tag dat) =
         dat' <- compileVal dat
         inject tagStr (codeGenExpression dat') & codeGenFromExpr & return
 
-compileCase :: Monad m => V.Case (Val (ValI m)) -> M m CodeGen
-compileCase = fmap codeGenFromExpr . lam "x" . compileCaseOnVar
-
 compileCaseOnVar ::
     Monad m => V.Case (Val (ValI m)) -> JSS.Expression () -> M m [JSS.Statement ()]
 compileCaseOnVar x scrutineeVar =
@@ -408,6 +430,9 @@ compileCaseOnVar x scrutineeVar =
             compileAppliedFunc handler (scrutineeVar $. "data")
             <&> codeGenLamStmts
             <&> JS.casee (JS.string tagStr)
+
+compileCase :: Monad m => V.Case (Val (ValI m)) -> M m CodeGen
+compileCase = fmap codeGenFromExpr . lam "x" . compileCaseOnVar
 
 compileGetField :: Monad m => V.GetField (Val (ValI m)) -> M m CodeGen
 compileGetField (V.GetField record tag) =
@@ -437,6 +462,19 @@ compileApply (V.Apply func arg) =
     do
         arg' <- compileVal arg <&> codeGenExpression
         compileAppliedFunc func arg'
+    >>= maybeLogSubexprResult
+
+maybeLogSubexprResult :: CodeGen -> M m CodeGen
+maybeLogSubexprResult codeGen =
+    RWS.asks envMode & M
+    <&> \case
+    FastSilent -> codeGen
+    SlowLogging loggingInfo -> logSubexprResult loggingInfo codeGen
+
+logSubexprResult :: LoggingInfo -> CodeGen -> CodeGen
+logSubexprResult _info codeGen =
+    JS.var "log" `JS.call` ["exprid", codeGenExpression codeGen]
+    & codeGenFromExpr
 
 compileAppliedFunc :: Monad m => Val (ValI m) -> JSS.Expression () -> M m CodeGen
 compileAppliedFunc func arg' =
