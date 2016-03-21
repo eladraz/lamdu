@@ -40,8 +40,11 @@ nil ::
     MaybeT (ConvertM m) (ExpressionU m a)
 nil (V.Nom tid val) exprPl =
     do
-        guard $ tid == Builtins.listTid
-        injTag <- val ^? V.body . ExprLens._BInject . V.injectTag & maybeToMPlus
+        guard $ tid == Builtins.streamTid
+        injTag <-
+            val ^?
+            V.body . ExprLens._BAbs . V.lamResult .
+            V.body . ExprLens._BInject . V.injectTag & maybeToMPlus
         guard $ injTag == Builtins.nilTag
         let mkListActions exprS =
                 ListActions
@@ -114,10 +117,14 @@ cons ::
     (MonadA m, Monoid a) =>
     V.Nom (Val (Input.Payload m a)) -> Input.Payload m a ->
     MaybeT (ConvertM m) (ExpressionU m a)
-cons (V.Nom nomId (Val injPl (V.BInject (V.Inject tag argI)))) exprPl
-    | tag == Builtins.consTag
-    && nomId == Builtins.listTid =
+cons (V.Nom nomId val) exprPl =
     do
+        nomId == Builtins.streamTid & guard
+        lamRes <- val ^? V.body . ExprLens._BAbs . V.lamResult & maybeToMPlus
+        let lamPl = val ^. V.payload
+        V.Inject tag argI <- lamRes ^? V.body . ExprLens._BInject & maybeToMPlus
+        tag == Builtins.consTag & guard
+        let injPl = lamRes ^. V.payload
         argS <- ConvertM.convertSubexpression argI & lift
         ConsParams headS tailS <- getSugaredHeadTail argS
         (pls, ConsParams headI tailI) <- valConsParams argI & maybeToMPlus
@@ -128,6 +135,7 @@ cons (V.Nom nomId (Val injPl (V.BInject (V.Inject tag argI)))) exprPl
                 & liExpr . rPayload . plData <>~ mconcat
                 [ tailS ^. rPayload . plData
                 , pls ^. traverse . Input.userData
+                , lamPl ^. Input.userData
                 , injPl ^. Input.userData
                 ]
         let actions =
@@ -156,4 +164,3 @@ cons (V.Nom nomId (Val injPl (V.BInject (V.Inject tag argI)))) exprPl
             & BodyList
             & addActions exprPl & lift
             <&> rPayload . plActions . setToInnerExpr .~ setToInner
-cons _ _ = mzero
