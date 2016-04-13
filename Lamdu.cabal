@@ -76,7 +76,7 @@ Library
                   , Graphics.UI.Bottle.Main.Image
                   , Graphics.UI.Bottle.ModKey
                   , Graphics.UI.Bottle.Rect
-                  , Graphics.UI.Bottle.SizedFont
+                  , Graphics.UI.Bottle.Font
                   , Graphics.UI.Bottle.View
                   , Graphics.UI.Bottle.Widget
                   , Graphics.UI.Bottle.WidgetId
