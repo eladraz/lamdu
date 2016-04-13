@@ -76,7 +76,7 @@ mainLoop win imageHandlers =
                             maybe (return ResultNone) (draw winSize)
         eventLoop win handleEvents
     where
-        draw winSize@(Vector2 winSizeX winSizeY) image =
+        draw (Vector2 winSizeX winSizeY) image =
             do
                 GL.viewport $=
                     (GL.Position 0 0,
@@ -84,6 +84,5 @@ mainLoop win imageHandlers =
                 image
                     & (DrawUtils.translate (Vector2 (-1) 1) <>
                        DrawUtils.scale (Vector2 (2/winSizeX) (-2/winSizeY)) %%)
-                    & let Vector2 glPixelRatioX glPixelRatioY = winSize / 2 -- GL range is -1..1
-                      in DrawUtils.clearRenderSized (glPixelRatioX, glPixelRatioY)
+                    & DrawUtils.clearRender
                 return ResultDidDraw

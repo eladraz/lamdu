@@ -268,10 +268,10 @@ withFontLoop configSampler act =
                     when (newAbsFonts /= absFonts) $ E.throwIO FontChanged
         let runAct = act fontsVer throwIfFontChanged
         res <-
-            withFont (const (return Nothing)) absFonts $ \fonts ->
+            withFont (const (return Nothing)) 72 absFonts $ \fonts ->
             Just <$> runAct fonts
         case res of
-            Nothing -> withFont E.throwIO defaultFontsAbs runAct
+            Nothing -> withFont E.throwIO 72 defaultFontsAbs runAct
             Just success -> return success
     where
         withFont err = Font.with (\x@E.SomeException{} -> err x)

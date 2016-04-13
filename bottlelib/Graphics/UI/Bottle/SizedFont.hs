@@ -35,7 +35,7 @@ render ::
     (TextSize (Vector2 Draw.R), Draw.Image ())
 render sizedFont color mUnderline str =
     ( size
-    , ( ( DrawUtils.scale (realToFrac (sizedFont ^. fontSize)) %%
+    , ( ( DrawUtils.scale (realToFrac (sizedFont ^. fontSize) / 72) %%
           DrawUtils.drawText (sizedFont ^. font) str
         ) & Draw.tint color
       ) <> maybe mempty (drawUnderline sizedFont (DrawUtils.bounding size)) mUnderline
@@ -51,11 +51,11 @@ drawUnderline sizedFont size (Underline color width) =
     & Draw.tint color
     where
         descender =
-            realToFrac (sizedFont ^. fontSize) *
+            realToFrac (sizedFont ^. fontSize) / 72 *
             Draw.fontDescender (sizedFont ^. font)
 
 textHeight :: SizedFont -> Draw.R
-textHeight SizedFont{..} = DrawUtils.textHeight * realToFrac _fontSize
+textHeight SizedFont{..} = DrawUtils.textHeight _font * realToFrac _fontSize / 72
 
 textSize :: SizedFont -> String -> TextSize (Vector2 Draw.R)
-textSize SizedFont{..} str = (realToFrac _fontSize *) <$> DrawUtils.textSize _font str
+textSize SizedFont{..} str = (realToFrac _fontSize / 72 *) <$> DrawUtils.textSize _font str
